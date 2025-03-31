@@ -1,30 +1,36 @@
-import zipfile
-import tempfile
 import cv2
+import pyarrow as pa
+import pyarrow.feather as feather
+import numpy as np
+import pandas as pd
 
-"""zf = zipfile.ZipFile('data/original/livestream.mp4.zip')
+def flatten(xss):
+    return [x for xs in xss for x in xs]
 
-with tempfile.TemporaryDirectory() as tempdir:
-    zf.extractall(tempdir)
-    vidcap = cv2.VideoCapture(tempdir + '/livestream.mp4')
+def extract_frames(filename, per_secs, label):
+    vidcap = cv2.VideoCapture(filename)
+    fps = vidcap.get(cv2.CAP_PROP_FPS)
     success,image = vidcap.read()
-    count = 0
-    while count < 1:
-        cv2.imwrite("frame%d.jpg" % count, image)     # save frame as JPEG file      
+
+    frames = []
+    i = 0
+    while success:
+        # save only frames every per_secs
+        if i % (per_secs * fps) == 0:
+            # remove color dimension and flatten
+            flattened = list(image[:,:,0].flatten())
+            print(label, image.shape)
+            frames.append(np.append(flattened, label)) 
+            break
+
         success,image = vidcap.read()
-        print('Read a new frame: ', success)
-        count += 1"""
+        i += 1
 
-vidcap = cv2.VideoCapture('data/original/livestream.mp4')
-fps = vidcap.get(cv2.CAP_PROP_FPS)
-success,image = vidcap.read()
+    return frames
 
-count = 0
-i = 0
-while success:
-    if i % (2 * fps) == 0:
-        cv2.imwrite("data/original/stream_frames/frame%d.jpg" % count, image)     # save frame as JPEG file      
-        count += 1
+fish_frames = extract_frames('data/working/labelled_videos/fish_frames.mp4', 2, 1)
+no_fish_frames = extract_frames('data/working/labelled_videos/no_fish_frames.mp4', 2, 0)
 
-    success,image = vidcap.read()
-    i += 1
+# frames = pd.DataFrame(fish_frames + no_fish_frames, columns=list(range(101376)).append("label"))
+# print(frames)
+# feather.write_feather(pa.Table.from_arrays(frames, names=names), "data/working/fish_frames.feather")

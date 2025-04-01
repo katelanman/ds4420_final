@@ -17,11 +17,10 @@ def extract_frames(filename, per_secs, label):
     while success:
         # save only frames every per_secs
         if i % (per_secs * fps) == 0:
-            # remove color dimension and flatten
-            flattened = list(image[:,:,0].flatten())
-            print(label, image.shape)
-            frames.append(np.append(flattened, label)) 
-            break
+            # resize image to be (288, 352), remove color dimension, and flatten
+            image = cv2.resize(image,(288,352))[:,:,0].flatten()
+
+            frames.append(np.append(image, label)) 
 
         success,image = vidcap.read()
         i += 1
@@ -29,8 +28,13 @@ def extract_frames(filename, per_secs, label):
     return frames
 
 fish_frames = extract_frames('data/working/labelled_videos/fish_frames.mp4', 2, 1)
-no_fish_frames = extract_frames('data/working/labelled_videos/no_fish_frames.mp4', 2, 0)
+print("fist frames done")
 
-# frames = pd.DataFrame(fish_frames + no_fish_frames, columns=list(range(101376)).append("label"))
-# print(frames)
-# feather.write_feather(pa.Table.from_arrays(frames, names=names), "data/working/fish_frames.feather")
+no_fish_frames = extract_frames('data/working/labelled_videos/no_fish_frames.mp4', 2, 0)
+print("no fish frames done")
+
+columns = list(range(101376))
+columns.append("label")
+
+frames = pd.DataFrame(fish_frames + no_fish_frames, columns=columns)
+feather.write_feather(frames, "data/working/fish_frames.feather")

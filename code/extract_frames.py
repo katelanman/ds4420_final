@@ -27,14 +27,15 @@ def extract_frames(filename, per_secs, label):
 
     return frames
 
-fish_frames = extract_frames('data/working/labelled_videos/fish_frames.mp4', 2, 1)
-print("fist frames done")
+if __name__ == "__main__":
+    fish_frames = extract_frames('data/working/labelled_videos/fish_frames.mp4', 2, 1)
+    print("fist frames done")
 
-no_fish_frames = extract_frames('data/working/labelled_videos/no_fish_frames.mp4', 2, 0)
-print("no fish frames done")
+    no_fish_frames = extract_frames('data/working/labelled_videos/no_fish_frames.mp4', 2, 0)
+    print("no fish frames done")
 
-columns = list(range(101376))
-columns.append("label")
+    columns = list(range(101376))
+    columns.append("label")
 
-frames = pd.DataFrame(fish_frames + no_fish_frames, columns=columns)
-feather.write_feather(frames, "data/working/fish_frames.feather")
+    frames = pd.DataFrame(fish_frames + no_fish_frames, columns=columns)
+    feather.write_feather(frames, "data/working/fish_frames.feather")

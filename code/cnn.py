@@ -5,6 +5,7 @@ from keras.layers import Dense, Input
 from keras.layers import Conv2D, MaxPooling2D, Flatten
 from keras.optimizers import SGD
 from keras.losses import binary_crossentropy
+import pyarrow.feather as feather
 
 def fish_cnn(img_rows, img_cols):
     """
@@ -40,10 +41,14 @@ def fish_cnn(img_rows, img_cols):
     
     return model
 
-# TODO: get data (read feather etc)
+# get data
+data = feather.read_feather("data/working/fish_frames.feather")
+X = data.drop('label', axis=1).to_numpy()
+y = data['label'].to_numpy()
 
-# TODO: match to pizel size of our imgs
-img_rows, img_cols = 540, 499
+print('data read')
+
+img_rows, img_cols = 288, 352
 
 # split data
 X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2)
@@ -52,8 +57,12 @@ X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2)
 X_train = X_train.reshape(X_train.shape[0], img_rows, img_cols, 1) / 255
 X_test = X_test.reshape(X_test.shape[0], img_rows, img_cols, 1) / 255
 
+print('data split and scaled')
+
 model = fish_cnn(img_rows, img_cols)
 model.fit(X_train, y_train, epochs=10, verbose=True, batch_size=10)
+
+print('model fit')
 
 score = model.evaluate(X_test, y_test, verbose=0)
 print('loss=', score[0])

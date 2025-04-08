@@ -33,7 +33,7 @@ migrations <- na.omit(migrations)  # Remove NAs
 
 ```{r}
 # Visualize the time series
-ggplot(migrations, aes(x = timestamp, y = value)) +
+ggplot(migrations %>% filter(timestamp < "2000-05-21 01:00:00"), aes(x = timestamp, y = value)) +
   geom_line() +
   ggtitle('Fish Sightings History') +
   xlab('Time') +
@@ -44,7 +44,7 @@ ggplot(migrations, aes(x = timestamp, y = value)) +
 ```{r}
 # Lag and ACF Plots
 # Creating lag features (to do the analysis manually)
-for (i in 1:30) {
+for (i in 1:365) {
   migrations[, paste0('Lag_', i)] <- c(rep(NA, i), head(migrations$value, -i))
 }
 
@@ -56,7 +56,7 @@ acf(migrations$value, main = "Sightings ACF Plot")
 ```
 
 ```{r}
-lag = 29
+lag = 360
 
 # Split into training and test sets
 train_size <- round(0.8 * nrow(migrations))
@@ -68,7 +68,7 @@ y_train <- train_data$value
 y_test <- test_data$value
 
 # Confirm that Lag 10 still has a large correlation
-cor(migrations$value, lag(migrations$value, n = 10), use = "complete.obs")
+cor(migrations$value, lag(migrations$value, n = 360), use = "complete.obs")
 ```
 
 ```{r}
@@ -96,36 +96,10 @@ abline(0, 1, col = "red")
 ```
 ```{r}
 # Time series plot of actual vs predicted SO9
-plot(test_data$timestamp, test_data$value, type = "l", col = "blue", lwd = 2, ylim = range(c(y_pred, test_data$value)), xlab = "date", ylab = "migration count", main = "AR(1) Model Predictions")
+plot(test_data$timestamp, test_data$value, type = "l", col = "blue", lwd = 2, ylim = range(c(y_pred, test_data$value)), xlab = "date", ylab = "migration count", main = "AR(365) Model Predictions")
 lines(test_data$timestamp, y_pred, col = "red", lwd = 2, lty = 2)
-legend("topleft", legend = c("Actual Migration", "AR(1) Predicted Migration"), col = c("blue", "red"), lty = c(1, 2), bty = "n")
+legend("topleft", legend = c("Actual Migration", "AR(365) Predicted Migration"), col = c("blue", "red"), lty = c(1, 2), bty = "n")
 
 ```
-```{r}
-ar_model <- ar(y_train, order.max = 29, aic = FALSE, method = "ols", demean = FALSE)  # AR(1)
-# get the parameter
-ar_model$ar
-# To estimate an intercept (the mean of the series), set demean = TRUE (the default)
-# ar_model <- ar(y_train, order.max = 1, aic = FALSE, method = "ols", demean = TRUE)  # AR(1)
-# get the parameters
-# c(ar_model$ar, ar_model$x.intercept)
 
-# To check the roots, need to manually calculate
-# Don't worry too much about this math
-# Once again, these should be > 1 to meet the stationarity assumption
-ar_roots <- polyroot(c(1, -ar_model$ar))
-Mod(ar_roots)
-
-# Get predictions
-ar_pred <- predict(ar_model, n.ahead = length(y_test))
-
-# Convert AR predictions to a data frame
-pred_data <- data.frame(Year = test_data$timestamp, pred_SO9 = ar_pred$pred)
-
-# Plot actual vs predicted from AR model
-plot(test_data$timestamp, test_data$value, type = "l", col = "blue", lwd = 2, xlab = "Year", ylab = "Strikeout Rate", main = "AR(1) Model Predictions")
-lines(pred_data$Year, pred_data$pred_SO9, col = "red", lwd = 2, lty = 2)
-legend("topleft", legend = c("Actual SO9", "AR(1) Predicted SO9"), col = c("blue", "red"), lty = c(1, 2), bty = "n")
-
-```
 

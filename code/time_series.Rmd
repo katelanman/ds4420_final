@@ -13,6 +13,8 @@ data(package="stacomiR") # all fish migration datasets available
 stacomi(database_expected=FALSE)    
 ```
 
+Summed by week
+
 ```{r}
 data("r_mig_interannual_vichy")
 assign("r_mig_interannual_vichy",r_mig_interannual_vichy,envir=envir_stacomi)
@@ -21,10 +23,17 @@ df <- r_mig_interannual_vichy@data
 df <- df %>% filter(bjo_labelquantite=="Effectif_total") %>%
   select(c(bjo_identifiant, bjo_dis_identifiant,
            bjo_annee, bjo_jour, bjo_valeur)) %>%
-  mutate(bjo_valeur = case_when(bjo_valeur < 0 ~ 0,
-                                TRUE ~ bjo_valeur)) %>%
+  # mutate(bjo_valeur = case_when(bjo_valeur < 0 ~ 0,
+  #                               TRUE ~ bjo_valeur)) %>%
   rename(sample_id=bjo_identifiant, dc_id=bjo_dis_identifiant,
          year=bjo_annee, timestamp=bjo_jour, value=bjo_valeur)
+
+df$week <- strftime(df$timestamp, format = "%V")
+df <- df %>% group_by(week, year) %>%
+  summarize(value = sum(value),
+            timestamp = first(timestamp)) %>% 
+  ungroup() %>%
+  arrange(timestamp)
 
 # Extract single feature we want to predict (and drop any NAs)
 migrations <- df %>% select(c(timestamp, value))
@@ -44,7 +53,7 @@ ggplot(migrations %>% filter(timestamp < "2000-05-21 01:00:00"), aes(x = timesta
 ```{r}
 # Lag and ACF Plots
 # Creating lag features (to do the analysis manually)
-for (i in 1:365) {
+for (i in 1:55) {
   migrations[, paste0('Lag_', i)] <- c(rep(NA, i), head(migrations$value, -i))
 }
 
@@ -56,7 +65,7 @@ acf(migrations$value, main = "Sightings ACF Plot")
 ```
 
 ```{r}
-lag = 360
+lag = 50
 
 # Split into training and test sets
 train_size <- round(0.8 * nrow(migrations))
@@ -68,7 +77,7 @@ y_train <- train_data$value
 y_test <- test_data$value
 
 # Confirm that Lag 10 still has a large correlation
-cor(migrations$value, lag(migrations$value, n = 360), use = "complete.obs")
+cor(migrations$value, lag(migrations$value, n = lag), use = "complete.obs")
 ```
 
 ```{r}
@@ -96,10 +105,207 @@ abline(0, 1, col = "red")
 ```
 ```{r}
 # Time series plot of actual vs predicted SO9
-plot(test_data$timestamp, test_data$value, type = "l", col = "blue", lwd = 2, ylim = range(c(y_pred, test_data$value)), xlab = "date", ylab = "migration count", main = "AR(365) Model Predictions")
+plot(test_data$timestamp, test_data$value, type = "l", col = "blue", lwd = 2, ylim = range(c(y_pred, test_data$value)), xlab = "date", ylab = "migration count", main = paste0("AR(",lag,") Model Predictions"))
 lines(test_data$timestamp, y_pred, col = "red", lwd = 2, lty = 2)
-legend("topleft", legend = c("Actual Migration", "AR(365) Predicted Migration"), col = c("blue", "red"), lty = c(1, 2), bty = "n")
+legend("topleft", legend = c("Actual Migration", paste0("AR(",lag,") Predicted Migration")), col = c("blue", "red"), lty = c(1, 2), bty = "n")
 
 ```
 
+Averaged by week
 
+```{r}
+data("r_mig_interannual_vichy")
+assign("r_mig_interannual_vichy",r_mig_interannual_vichy,envir=envir_stacomi)
+
+df <- r_mig_interannual_vichy@data
+df <- df %>% filter(bjo_labelquantite=="Effectif_total") %>%
+  select(c(bjo_identifiant, bjo_dis_identifiant,
+           bjo_annee, bjo_jour, bjo_valeur)) %>%
+  # mutate(bjo_valeur = case_when(bjo_valeur < 0 ~ 0,
+  #                               TRUE ~ bjo_valeur)) %>%
+  rename(sample_id=bjo_identifiant, dc_id=bjo_dis_identifiant,
+         year=bjo_annee, timestamp=bjo_jour, value=bjo_valeur)
+
+df$week <- strftime(df$timestamp, format = "%V")
+df <- df %>% group_by(week, year) %>%
+  summarize(value = mean(value),
+            timestamp = first(timestamp)) %>% 
+  ungroup() %>%
+  arrange(timestamp)
+
+# Extract single feature we want to predict (and drop any NAs)
+migrations <- df %>% select(c(timestamp, value))
+migrations <- na.omit(migrations)  # Remove NAs
+```
+
+```{r}
+# Visualize the time series
+ggplot(migrations %>% filter(timestamp < "2000-05-21 01:00:00"), aes(x = timestamp, y = value)) +
+  geom_line() +
+  ggtitle('Fish Sightings History') +
+  xlab('Time') +
+  ylab('Sightings') +
+  theme_minimal()
+```
+
+```{r}
+# Lag and ACF Plots
+# Creating lag features (to do the analysis manually)
+for (i in 1:55) {
+  migrations[, paste0('Lag_', i)] <- c(rep(NA, i), head(migrations$value, -i))
+}
+
+# Drop rows with missing values due to lagging
+migrations <- na.omit(migrations)
+
+# Autocorrelation Function
+acf(migrations$value, main = "Sightings ACF Plot")
+```
+
+```{r}
+lag = 52
+
+# Split into training and test sets
+train_size <- round(0.8 * nrow(migrations))
+train_data <- migrations[1:train_size,]
+test_data <- migrations[(train_size + 1):nrow(migrations),]
+
+# Define y_train and y_test
+y_train <- train_data$value
+y_test <- test_data$value
+
+# Confirm that Lag 10 still has a large correlation
+cor(migrations$value, lag(migrations$value, n = lag), use = "complete.obs")
+```
+
+```{r}
+# AR model
+X_train <- train_data %>% select(paste("Lag", 1:lag, sep = "_"))
+
+# Fit AR(p) Model (OLS)
+X_matrix <- as.matrix(cbind(1, X_train))  # Add intercept column (if desired)
+y_vector <- as.matrix(y_train)
+w <- solve(t(X_matrix) %*% X_matrix) %*% (t(X_matrix) %*% y_vector)
+
+# Predict migration using AR(p)
+y_pred <- numeric(length(y_test))
+start <- as.matrix(tail(X_train, 1))
+
+for (i in 1:length(y_test)) {
+  y_pred[i] <- as.numeric(w[1] + start %*% as.matrix(w[2:(lag+1)]))
+  start <- c(y_pred[i], start[1:(lag-1)])
+}
+
+# Observed vs predicted plot
+plot(y_pred, y_test, ylab = "Observed Migration", xlab = "Predicted Migration", 
+     main = paste0("AR(",lag,") Model Predictions"))
+abline(0, 1, col = "red")
+```
+```{r}
+# Time series plot of actual vs predicted SO9
+plot(test_data$timestamp, test_data$value, type = "l", col = "blue", lwd = 2, ylim = range(c(y_pred, test_data$value)), xlab = "date", ylab = "migration count", main = paste0("AR(",lag,") Model Predictions"))
+lines(test_data$timestamp, y_pred, col = "red", lwd = 2, lty = 2)
+legend("topleft", legend = c("Actual Migration", paste0("AR(",lag,") Predicted Migration")), col = c("blue", "red"), lty = c(1, 2), bty = "n")
+
+```
+```{r}
+base_ma <- function(x, n, align = c("right", "center")) {
+  align <- match.arg(align)
+  if (align == "right") {
+    side <- 1 
+  } else if (align == "center") {
+    side <- 2
+  }
+  as.numeric(stats::filter(x, rep(1 / n, n), sides = side))
+}
+
+data("r_mig_interannual_vichy")
+assign("r_mig_interannual_vichy",r_mig_interannual_vichy,envir=envir_stacomi)
+
+df <- r_mig_interannual_vichy@data
+df <- df %>% filter(bjo_labelquantite=="Effectif_total") %>%
+  select(c(bjo_identifiant, bjo_dis_identifiant,
+           bjo_annee, bjo_jour, bjo_valeur)) %>%
+  mutate(bjo_valeur = case_when(bjo_valeur < 0 ~ 0,
+                                TRUE ~ bjo_valeur)) %>%
+  rename(sample_id=bjo_identifiant, dc_id=bjo_dis_identifiant,
+         year=bjo_annee, timestamp=bjo_jour, value=bjo_valeur)
+
+df$ma <- base_ma(df$value, n = 10, align = "right")
+df <- na.omit(df)
+
+# Extract single feature we want to predict (and drop any NAs)
+migrations <- df %>% select(c(timestamp, ma))
+migrations <- na.omit(migrations)  # Remove NAs
+```
+
+```{r}
+# Visualize the time series
+ggplot(migrations %>% filter(timestamp < "2000-05-21 01:00:00"), aes(x = timestamp, y = ma)) +
+  geom_line() +
+  ggtitle('Fish Sightings History') +
+  xlab('Time') +
+  ylab('Sightings') +
+  theme_minimal()
+```
+
+```{r}
+# Lag and ACF Plots
+# Creating lag features (to do the analysis manually)
+for (i in 1:365) {
+  migrations[, paste0('Lag_', i)] <- c(rep(NA, i), head(migrations$ma, -i))
+}
+
+# Drop rows with missing values due to lagging
+migrations <- na.omit(migrations)
+
+# Autocorrelation Function
+acf(migrations$ma, main = "Sightings ACF Plot")
+```
+
+```{r}
+lag = 365
+
+# Split into training and test sets
+train_size <- round(0.8 * nrow(migrations))
+train_data <- migrations[1:train_size,]
+test_data <- migrations[(train_size + 1):nrow(migrations),]
+
+# Define y_train and y_test
+y_train <- train_data$ma
+y_test <- test_data$ma
+
+# Confirm that Lag 10 still has a large correlation
+cor(migrations$ma, lag(migrations$ma, n = lag), use = "complete.obs")
+```
+
+```{r}
+# AR(30) model
+X_train <- train_data %>% select(paste("Lag", 1:lag, sep = "_"))
+
+# Fit AR(30) Model (OLS)
+X_matrix <- as.matrix(cbind(1, X_train))  # Add intercept column (if desired)
+y_vector <- as.matrix(y_train)
+w <- solve(t(X_matrix) %*% X_matrix) %*% (t(X_matrix) %*% y_vector)
+
+# Predict migration using AR(30)
+y_pred <- numeric(length(y_test))
+start <- as.matrix(tail(X_train, 1))
+
+for (i in 1:length(y_test)) {
+  y_pred[i] <- as.numeric(w[1] + start %*% as.matrix(w[2:(lag+1)]))
+  start <- c(y_pred[i], start[1:(lag-1)])
+}
+
+# Observed vs predicted plot
+plot(y_pred, y_test, ylab = "Observed Migration", xlab = "Predicted Migration", 
+     main = "AR(30) Model Predictions")
+abline(0, 1, col = "red")
+```
+```{r}
+# Time series plot of actual vs predicted SO9
+plot(test_data$timestamp, test_data$ma, type = "l", col = "blue", lwd = 2, ylim = range(c(y_pred, test_data$ma)), xlab = "date", ylab = "migration count", main = paste0("AR(",lag,") Model Predictions"))
+lines(test_data$timestamp, y_pred, col = "red", lwd = 2, lty = 2)
+legend("topleft", legend = c("Actual Migration", paste0("AR(",lag,") Predicted Migration")), col = c("blue", "red"), lty = c(1, 2), bty = "n")
+
+```

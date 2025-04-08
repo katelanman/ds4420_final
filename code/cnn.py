@@ -42,33 +42,4 @@ def fish_cnn(img_rows, img_cols):
     
     return model
 
-# get data
-data = feather.read_feather("data/working/fish_test.feather")
-X = data.drop('label', axis=1).to_numpy()
-y = data['label'].to_numpy()
-print(data)
 
-
-
-print('data read')
-
-img_rows, img_cols = 288, 352
-
-# split data
-X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2)
-print(y_test)
-
-# add dimensionality and scale
-X_train = X_train.reshape(X_train.shape[0], img_rows, img_cols, 1) / 255
-X_test = X_test.reshape(X_test.shape[0], img_rows, img_cols, 1) / 255
-
-print('data split and scaled')
-
-model = fish_cnn(img_rows, img_cols)
-model.fit(X_train, y_train, epochs=10, verbose=True, batch_size=30)
-
-print('model fit')
-
-score = model.evaluate(X_test, y_test, verbose=0)
-print('loss=', score[0])
-print('accuracy=', score[1])

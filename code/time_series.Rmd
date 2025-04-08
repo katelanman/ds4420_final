@@ -4,6 +4,8 @@ library(stacomiR)
 library(dplyr)
 library(ggplot2)
 library(forecast)
+library(tidyr)
+library(stringr)
 ```
 
 ```{r}
@@ -32,12 +34,26 @@ df <- df %>% filter(bjo_labelquantite=="Effectif_total") %>%
 df$week <- strftime(df$timestamp, format = "%V")
 df <- df %>% group_by(week, year) %>%
   summarize(value = sum(value),
-            timestamp = first(timestamp)) %>% 
+            timestamp = first(timestamp)) %>%
   ungroup() %>%
   arrange(timestamp)
 
+years <- 1997:2012
+year_weeks <- data.frame(year=rep(years, 53)) %>% arrange(year)
+year_weeks$week <- rep(1:53, length(years))
+
+imputed <- merge(year_weeks, df, by=c("year", "week"), all.x = TRUE)
+imputed <- imputed %>% mutate(
+    beginning = lubridate::ymd(str_c(year, "-01-01")),
+    final_date = beginning + lubridate::weeks(sprintf("%02d", week)),
+    month = format(final_date, "%m")
+  ) %>% select(-c(beginning)) %>% group_by(month, year) %>%
+  mutate(value = replace_na(value, mean(na.omit(value)))) %>% 
+  ungroup() %>%
+  mutate(value = replace_na(value, 0))
+
 # Extract single feature we want to predict (and drop any NAs)
-migrations <- df %>% select(c(timestamp, value))
+migrations <- imputed %>% select(c(timestamp, value))
 migrations <- na.omit(migrations)  # Remove NAs
 ```
 
@@ -134,8 +150,22 @@ df <- df %>% group_by(week, year) %>%
   ungroup() %>%
   arrange(timestamp)
 
+years <- 1997:2012
+year_weeks <- data.frame(year=rep(years, 53)) %>% arrange(year)
+year_weeks$week <- rep(1:53, length(years))
+
+imputed <- merge(year_weeks, df, by=c("year", "week"), all.x = TRUE)
+imputed <- imputed %>% mutate(
+    beginning = lubridate::ymd(str_c(year, "-01-01")),
+    final_date = beginning + lubridate::weeks(sprintf("%02d", week)),
+    month = format(final_date, "%m")
+  ) %>% select(-c(beginning)) %>% group_by(month, year) %>%
+  mutate(value = replace_na(value, mean(na.omit(value)))) %>% 
+  ungroup() %>%
+  mutate(value = replace_na(value, 0))
+
 # Extract single feature we want to predict (and drop any NAs)
-migrations <- df %>% select(c(timestamp, value))
+migrations <- imputed %>% select(c(timestamp, value))
 migrations <- na.omit(migrations)  # Remove NAs
 ```
 
@@ -312,10 +342,40 @@ legend("topleft", legend = c("Actual Migration", paste0("AR(",lag,") Predicted M
 ```
 
 ```{r}
+df <- r_mig_interannual_vichy@data
+df <- df %>% filter(bjo_labelquantite=="Effectif_total") %>%
+  select(c(bjo_identifiant, bjo_dis_identifiant,
+           bjo_annee, bjo_jour, bjo_valeur)) %>%
+  # mutate(bjo_valeur = case_when(bjo_valeur < 0 ~ 0,
+  #                               TRUE ~ bjo_valeur)) %>%
+  rename(sample_id=bjo_identifiant, dc_id=bjo_dis_identifiant,
+         year=bjo_annee, timestamp=bjo_jour, value=bjo_valeur)
+
+df$week <- strftime(df$timestamp, format = "%V")
+df <- df %>% group_by(week, year) %>%
+  summarize(value = sum(value),
+            timestamp = first(timestamp)) %>% 
+  ungroup() %>%
+  arrange(timestamp)
+
+years <- 1997:2012
+year_weeks <- data.frame(year=rep(years, 53)) %>% arrange(year)
+year_weeks$week <- rep(1:53, length(years))
+
+imputed <- merge(year_weeks, df, by=c("year", "week"), all.x = TRUE)
+imputed <- imputed %>% mutate(
+    beginning = lubridate::ymd(str_c(year, "-01-01")),
+    final_date = beginning + lubridate::weeks(sprintf("%02d", week)),
+    month = format(final_date, "%m")
+  ) %>% select(-c(beginning)) %>% group_by(month, year) %>%
+  mutate(value = replace_na(value, mean(na.omit(value)))) %>% 
+  ungroup() %>%
+  mutate(value = replace_na(value, 0))
+
 # Extract single feature we want to predict (and drop any NAs)
-migrations <- df %>% select(c(timestamp, value))
+migrations <- imputed %>% select(c(timestamp, value))
 migrations <- na.omit(migrations)  # Remove NAs
-migrations
+
 # Split into training and test sets
 train_size <- round(0.8 * nrow(migrations))
 train_data <- migrations[1:train_size,]
@@ -327,7 +387,7 @@ y_test <- test_data
 
 y_train_ts <- ts(y_train, frequency=12)
 
-sarima_model <- auto.arima(y_train_ts, seasonal = TRUE, stepwise = FALSE, approximation = FALSE)
+sarima_model <- auto.arima(y_train_ts[,"value"], seasonal = TRUE, stepwise = FALSE, approximation = FALSE)
 
 forecast_steps <- length(y_test)
 

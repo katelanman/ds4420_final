@@ -1,0 +1,80 @@
+```{r}
+library(stats)
+library(stacomiR)
+library(dplyr)
+library(ggplot2)
+```
+
+```{r}
+# import fish migration data
+require(stacomiR)
+data(package="stacomiR") # all fish migration datasets available
+
+stacomi(database_expected=FALSE)    
+```
+
+```{r}
+data("r_mig_interannual_vichy")
+assign("r_mig_interannual_vichy",r_mig_interannual_vichy,envir=envir_stacomi)
+
+df <- r_mig_interannual_vichy@data
+df <- df %>% filter(bjo_labelquantite=="Effectif_total") %>%
+  select(c(bjo_identifiant, bjo_dis_identifiant,
+           bjo_annee, bjo_jour, bjo_valeur)) %>%
+  mutate(bjo_valeur = case_when(bjo_valeur < 0 ~ 0,
+                                TRUE ~ bjo_valeur)) %>%
+  rename(sample_id=bjo_identifiant, dc_id=bjo_dis_identifiant,
+         year=bjo_annee, timestamp=bjo_jour, value=bjo_valeur)
+
+# Extract single feature we want to predict (and drop any NAs)
+migrations <- df %>% select(c(timestamp, value))
+migrations <- na.omit(migrations)  # Remove NAs
+```
+
+```{r}
+# Visualize the time series
+ggplot(migrations, aes(x = timestamp, y = value)) +
+  geom_line() +
+  ggtitle('Fish Sightings History') +
+  xlab('Time') +
+  ylab('Sightings') +
+  theme_minimal()
+```
+
+```{r}
+# Lag and ACF Plots
+# Creating lag features (to do the analysis manually)
+for (i in 1:10) {
+  migrations[, paste0('Lag_', i)] <- c(rep(NA, i), head(migrations$value, -i))
+}
+
+# Drop rows with missing values due to lagging
+migrations <- na.omit(migrations)
+
+# Autocorrelation Function
+acf(migrations$value, main = "Sightings ACF Plot")
+```
+
+```{r}
+# Split into training and test sets
+train_size <- round(0.8 * nrow(migrations))
+train_data <- migrations[1:train_size,]
+test_data <- migrations[(train_size + 1):nrow(migrations),]
+
+# Define y_train and y_test
+y_train <- train_data$value
+y_test <- test_data$value
+
+# Confirm that Lag 10 still has a large correlation
+cor(migrations$value, lag(migrations$value, n = 10), use = "complete.obs")
+```
+
+```{r}
+# Simple AR(1) model
+X_train <- train_data$Lag_1
+
+# Scatterplot to confirm correlation at Lag 1
+plot(X_train, y_train, xlab = "Lag 1 values", ylab = "Observed values", main = "Lag 1 vs value")
+```
+
+

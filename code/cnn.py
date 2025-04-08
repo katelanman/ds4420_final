@@ -52,6 +52,7 @@ img_rows, img_cols = 288, 352
 
 # split data
 X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2)
+print(y_test)
 
 # add dimensionality and scale
 X_train = X_train.reshape(X_train.shape[0], img_rows, img_cols, 1) / 255

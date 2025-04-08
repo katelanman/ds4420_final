@@ -6,6 +6,7 @@ from keras.layers import Conv2D, MaxPooling2D, Flatten
 from keras.optimizers import SGD
 from keras.losses import binary_crossentropy
 import pyarrow.feather as feather
+import numpy as np
 
 def fish_cnn(img_rows, img_cols):
     """
@@ -29,8 +30,8 @@ def fish_cnn(img_rows, img_cols):
     flat_G = Flatten()(conv2)
 
     # can decide how many hidden nodes to use
-    hidden1 = Dense(250, activation='linear')(flat_G)
-    hidden2 = Dense(250, activation='relu')(hidden1)
+    hidden1 = Dense(1000, activation='linear')(flat_G)
+    hidden2 = Dense(500, activation='relu')(hidden1)
 
     out_layer = Dense(1, activation='sigmoid')(hidden2)
 
@@ -42,9 +43,12 @@ def fish_cnn(img_rows, img_cols):
     return model
 
 # get data
-data = feather.read_feather("data/working/fish_frames.feather")
+data = feather.read_feather("data/working/fish_test.feather")
 X = data.drop('label', axis=1).to_numpy()
 y = data['label'].to_numpy()
+print(data)
+
+
 
 print('data read')
 
@@ -61,7 +65,7 @@ X_test = X_test.reshape(X_test.shape[0], img_rows, img_cols, 1) / 255
 print('data split and scaled')
 
 model = fish_cnn(img_rows, img_cols)
-model.fit(X_train, y_train, epochs=10, verbose=True, batch_size=10)
+model.fit(X_train, y_train, epochs=10, verbose=True, batch_size=30)
 
 print('model fit')
 

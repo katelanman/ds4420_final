@@ -342,12 +342,13 @@ legend("topleft", legend = c("Actual Migration", paste0("AR(",lag,") Predicted M
 ```
 
 ```{r}
+# Preprocessing steps
 df <- r_mig_interannual_vichy@data
 df <- df %>% filter(bjo_labelquantite=="Effectif_total") %>%
   select(c(bjo_identifiant, bjo_dis_identifiant,
            bjo_annee, bjo_jour, bjo_valeur)) %>%
-  # mutate(bjo_valeur = case_when(bjo_valeur < 0 ~ 0,
-  #                               TRUE ~ bjo_valeur)) %>%
+    mutate(bjo_valeur = case_when(bjo_valeur < 0 ~ 1,
+                                 TRUE ~ bjo_valeur)) %>%
   rename(sample_id=bjo_identifiant, dc_id=bjo_dis_identifiant,
          year=bjo_annee, timestamp=bjo_jour, value=bjo_valeur)
 
@@ -359,8 +360,8 @@ df <- df %>% group_by(week, year) %>%
   arrange(timestamp)
 
 years <- 1997:2012
-year_weeks <- data.frame(year=rep(years, 53)) %>% arrange(year)
-year_weeks$week <- rep(1:53, length(years))
+year_weeks <- data.frame(year=rep(years, 52)) %>% arrange(year)
+year_weeks$week <- rep(1:52, length(years))
 
 imputed <- merge(year_weeks, df, by=c("year", "week"), all.x = TRUE)
 imputed <- imputed %>% mutate(
@@ -375,7 +376,10 @@ imputed <- imputed %>% mutate(
 # Extract single feature we want to predict (and drop any NAs)
 migrations <- imputed %>% select(c(timestamp, value))
 migrations <- na.omit(migrations)  # Remove NAs
+```
 
+
+```{r}
 # Split into training and test sets
 train_size <- round(0.8 * nrow(migrations))
 train_data <- migrations[1:train_size,]
@@ -385,26 +389,48 @@ test_data <- migrations[(train_size + 1):nrow(migrations),]
 y_train <- train_data
 y_test <- test_data
 
-y_train_ts <- ts(y_train, frequency=12)
+y_train_ts <- ts(y_train, frequency=52)
+y_train_ts <- y_train_ts[,"value"]
 
-sarima_model <- auto.arima(y_train_ts[,"value"], seasonal = TRUE, stepwise = FALSE, approximation = FALSE)
+# Apply a transformation to stabilize variance before modeling
+# Square root transformation is often good for count data
+y_train_ts_transformed <- sqrt(y_train_ts)
+```
 
-forecast_steps <- length(y_test)
+```{r}
+sarima_model <- auto.arima(y_train_ts_transformed, 
+                          seasonal = TRUE,
+                          stepwise = FALSE,
+                          approximation = FALSE,
+                          D = 1,              # Force seasonal differencing
+                          max.P = 2,          # Allow higher order seasonal AR
+                          max.Q = 2)          # Allow higher order seasonal MA
+  
+forecast_steps <- nrow(y_test)
+y_test <- y_test$value
 
 # Generate forecasts
 sarima_forecast <- forecast(sarima_model, h = forecast_steps)
 
-# View predicted values
-predicted_values <- sarima_forecast$mean
+# Transform the forecasts back to the original scale
+# Square the forecasts and prediction intervals
+predicted_values <- sarima_forecast$mean^2
 ```
+
+
 ```{r}
-# Plot forecast
-plot(sarima_forecast, main = "SARIMA Forecast vs Actual")
+# Grab max value to ensure that all y values are visible
+max_value <- max(c(predicted_values, y_test), na.rm = TRUE)
 
-# Add actual y_test values to the plot
-lines(ts(y_test, start = end(time(y_train_ts)) + c(0,1), frequency = 12), col = "red")
+plot(predicted_values, main = "SARIMA Forecast vs Actual", xlab = "Time", ylab = "Value", 
+     col = "blue", lwd = 2, ylim = c(0, max_value + 10))  # Forecasted values in blue
 
-legend("topleft", legend = c("Forecast", "Actual"), col = c("blue", "red"), lty = 1)
+# Add actual test data values to the plot (in red)
+lines(ts(y_test, start = end(time(y_train_ts)) + c(0,1), frequency = 52), 
+      col = "red", lwd = 2)
 
+# Add a legend to distinguish between predicted and actual
+legend("topleft", legend = c("Forecasted", "Actual"), col = c("blue", "red"), lty = 1, lwd = 2)
 ```
+
 

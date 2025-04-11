@@ -9,237 +9,10 @@ library(stringr)
 ```
 
 ```{r}
-# import fish migration data
-require(stacomiR)
-data(package="stacomiR") # all fish migration datasets available
-
-stacomi(database_expected=FALSE)    
-```
-
-Summed by week
-
-```{r}
-data("r_mig_interannual_vichy")
-assign("r_mig_interannual_vichy",r_mig_interannual_vichy,envir=envir_stacomi)
-
-df <- r_mig_interannual_vichy@data
-df <- df %>% filter(bjo_labelquantite=="Effectif_total") %>%
-  select(c(bjo_identifiant, bjo_dis_identifiant,
-           bjo_annee, bjo_jour, bjo_valeur)) %>%
-  # mutate(bjo_valeur = case_when(bjo_valeur < 0 ~ 0,
-  #                               TRUE ~ bjo_valeur)) %>%
-  rename(sample_id=bjo_identifiant, dc_id=bjo_dis_identifiant,
-         year=bjo_annee, timestamp=bjo_jour, value=bjo_valeur)
-
-df$week <- strftime(df$timestamp, format = "%V")
-df <- df %>% group_by(week, year) %>%
-  summarize(value = sum(value),
-            timestamp = first(timestamp)) %>%
-  ungroup() %>%
-  arrange(timestamp)
-
-years <- 1997:2012
-year_weeks <- data.frame(year=rep(years, 53)) %>% arrange(year)
-year_weeks$week <- rep(1:53, length(years))
-
-imputed <- merge(year_weeks, df, by=c("year", "week"), all.x = TRUE)
-imputed <- imputed %>% mutate(
-    beginning = lubridate::ymd(str_c(year, "-01-01")),
-    final_date = beginning + lubridate::weeks(sprintf("%02d", week)),
-    month = format(final_date, "%m")
-  ) %>% select(-c(beginning)) %>% group_by(month, year) %>%
-  mutate(value = replace_na(value, mean(na.omit(value)))) %>% 
-  ungroup() %>%
-  mutate(value = replace_na(value, 0))
-
-# Extract single feature we want to predict (and drop any NAs)
-migrations <- imputed %>% select(c(timestamp, value))
-migrations <- na.omit(migrations)  # Remove NAs
-```
-
-```{r}
-# Visualize the time series
-ggplot(migrations %>% filter(timestamp < "2000-05-21 01:00:00"), aes(x = timestamp, y = value)) +
-  geom_line() +
-  ggtitle('Fish Sightings History') +
-  xlab('Time') +
-  ylab('Sightings') +
-  theme_minimal()
-```
-
-```{r}
-# Lag and ACF Plots
-# Creating lag features (to do the analysis manually)
-for (i in 1:55) {
-  migrations[, paste0('Lag_', i)] <- c(rep(NA, i), head(migrations$value, -i))
-}
-
-# Drop rows with missing values due to lagging
-migrations <- na.omit(migrations)
-
-# Autocorrelation Function
-acf(migrations$value, main = "Sightings ACF Plot")
-```
-
-```{r}
-lag = 50
-
-# Split into training and test sets
-train_size <- round(0.8 * nrow(migrations))
-train_data <- migrations[1:train_size,]
-test_data <- migrations[(train_size + 1):nrow(migrations),]
-
-# Define y_train and y_test
-y_train <- train_data$value
-y_test <- test_data$value
-
-# Confirm that Lag 10 still has a large correlation
-cor(migrations$value, lag(migrations$value, n = lag), use = "complete.obs")
-```
-
-```{r}
-# AR(30) model
-X_train <- train_data %>% select(paste("Lag", 1:lag, sep = "_"))
-
-# Fit AR(30) Model (OLS)
-X_matrix <- as.matrix(cbind(1, X_train))  # Add intercept column (if desired)
-y_vector <- as.matrix(y_train)
-w <- solve(t(X_matrix) %*% X_matrix) %*% (t(X_matrix) %*% y_vector)
-
-# Predict migration using AR(30)
-y_pred <- numeric(length(y_test))
-start <- as.matrix(tail(X_train, 1))
-
-for (i in 1:length(y_test)) {
-  y_pred[i] <- as.numeric(w[1] + start %*% as.matrix(w[2:(lag+1)]))
-  start <- c(y_pred[i], start[1:(lag-1)])
-}
-
-# Observed vs predicted plot
-plot(y_pred, y_test, ylab = "Observed Migration", xlab = "Predicted Migration", 
-     main = "AR(30) Model Predictions")
-abline(0, 1, col = "red")
-```
-```{r}
-# Time series plot of actual vs predicted SO9
-plot(test_data$timestamp, test_data$value, type = "l", col = "blue", lwd = 2, ylim = range(c(y_pred, test_data$value)), xlab = "date", ylab = "migration count", main = paste0("AR(",lag,") Model Predictions"))
-lines(test_data$timestamp, y_pred, col = "red", lwd = 2, lty = 2)
-legend("topleft", legend = c("Actual Migration", paste0("AR(",lag,") Predicted Migration")), col = c("blue", "red"), lty = c(1, 2), bty = "n")
-
-```
-
-Averaged by week
-
-```{r}
-data("r_mig_interannual_vichy")
-assign("r_mig_interannual_vichy",r_mig_interannual_vichy,envir=envir_stacomi)
-
-df <- r_mig_interannual_vichy@data
-df <- df %>% filter(bjo_labelquantite=="Effectif_total") %>%
-  select(c(bjo_identifiant, bjo_dis_identifiant,
-           bjo_annee, bjo_jour, bjo_valeur)) %>%
-  # mutate(bjo_valeur = case_when(bjo_valeur < 0 ~ 0,
-  #                               TRUE ~ bjo_valeur)) %>%
-  rename(sample_id=bjo_identifiant, dc_id=bjo_dis_identifiant,
-         year=bjo_annee, timestamp=bjo_jour, value=bjo_valeur)
-
-df$week <- strftime(df$timestamp, format = "%V")
-df <- df %>% group_by(week, year) %>%
-  summarize(value = mean(value),
-            timestamp = first(timestamp)) %>% 
-  ungroup() %>%
-  arrange(timestamp)
-
-years <- 1997:2012
-year_weeks <- data.frame(year=rep(years, 53)) %>% arrange(year)
-year_weeks$week <- rep(1:53, length(years))
-
-imputed <- merge(year_weeks, df, by=c("year", "week"), all.x = TRUE)
-imputed <- imputed %>% mutate(
-    beginning = lubridate::ymd(str_c(year, "-01-01")),
-    final_date = beginning + lubridate::weeks(sprintf("%02d", week)),
-    month = format(final_date, "%m")
-  ) %>% select(-c(beginning)) %>% group_by(month, year) %>%
-  mutate(value = replace_na(value, mean(na.omit(value)))) %>% 
-  ungroup() %>%
-  mutate(value = replace_na(value, 0))
-
-# Extract single feature we want to predict (and drop any NAs)
-migrations <- imputed %>% select(c(timestamp, value))
-migrations <- na.omit(migrations)  # Remove NAs
-```
-
-```{r}
-# Visualize the time series
-ggplot(migrations %>% filter(timestamp < "2000-05-21 01:00:00"), aes(x = timestamp, y = value)) +
-  geom_line() +
-  ggtitle('Fish Sightings History') +
-  xlab('Time') +
-  ylab('Sightings') +
-  theme_minimal()
-```
-
-```{r}
-# Lag and ACF Plots
-# Creating lag features (to do the analysis manually)
-for (i in 1:55) {
-  migrations[, paste0('Lag_', i)] <- c(rep(NA, i), head(migrations$value, -i))
-}
-
-# Drop rows with missing values due to lagging
-migrations <- na.omit(migrations)
-
-# Autocorrelation Function
-acf(migrations$value, main = "Sightings ACF Plot")
-```
-
-```{r}
-lag = 52
-
-# Split into training and test sets
-train_size <- round(0.8 * nrow(migrations))
-train_data <- migrations[1:train_size,]
-test_data <- migrations[(train_size + 1):nrow(migrations),]
-
-# Define y_train and y_test
-y_train <- train_data$value
-y_test <- test_data$value
-
-# Confirm that Lag 10 still has a large correlation
-cor(migrations$value, lag(migrations$value, n = lag), use = "complete.obs")
-```
-
-```{r}
-# AR model
-X_train <- train_data %>% select(paste("Lag", 1:lag, sep = "_"))
-
-# Fit AR(p) Model (OLS)
-X_matrix <- as.matrix(cbind(1, X_train))  # Add intercept column (if desired)
-y_vector <- as.matrix(y_train)
-w <- solve(t(X_matrix) %*% X_matrix) %*% (t(X_matrix) %*% y_vector)
-
-# Predict migration using AR(p)
-y_pred <- numeric(length(y_test))
-start <- as.matrix(tail(X_train, 1))
-
-for (i in 1:length(y_test)) {
-  y_pred[i] <- as.numeric(w[1] + start %*% as.matrix(w[2:(lag+1)]))
-  start <- c(y_pred[i], start[1:(lag-1)])
-}
-
-# Observed vs predicted plot
-plot(y_pred, y_test, ylab = "Observed Migration", xlab = "Predicted Migration", 
-     main = paste0("AR(",lag,") Model Predictions"))
-abline(0, 1, col = "red")
-```
-```{r}
-# Time series plot of actual vs predicted SO9
-plot(test_data$timestamp, test_data$value, type = "l", col = "blue", lwd = 2, ylim = range(c(y_pred, test_data$value)), xlab = "date", ylab = "migration count", main = paste0("AR(",lag,") Model Predictions"))
-lines(test_data$timestamp, y_pred, col = "red", lwd = 2, lty = 2)
-legend("topleft", legend = c("Actual Migration", paste0("AR(",lag,") Predicted Migration")), col = c("blue", "red"), lty = c(1, 2), bty = "n")
-
-```
-```{r}
+# calculates moving averages for a given vector
+# x : vector to compute averages over
+# n : moving average window
+# align : whether to center or right align averages
 base_ma <- function(x, n, align = c("right", "center")) {
   align <- match.arg(align)
   if (align == "right") {
@@ -249,30 +22,76 @@ base_ma <- function(x, n, align = c("right", "center")) {
   }
   as.numeric(stats::filter(x, rep(1 / n, n), sides = side))
 }
+```
 
+```{r}
+# import fish migration data
+require(stacomiR)
+# data(package="stacomiR") # all fish migration datasets available
+
+stacomi(database_expected=FALSE)    
+```
+
+```{r}
 data("r_mig_interannual_vichy")
 assign("r_mig_interannual_vichy",r_mig_interannual_vichy,envir=envir_stacomi)
 
 df <- r_mig_interannual_vichy@data
 df <- df %>% filter(bjo_labelquantite=="Effectif_total") %>%
-  select(c(bjo_identifiant, bjo_dis_identifiant,
-           bjo_annee, bjo_jour, bjo_valeur)) %>%
-  mutate(bjo_valeur = case_when(bjo_valeur < 0 ~ 0,
-                                TRUE ~ bjo_valeur)) %>%
   rename(sample_id=bjo_identifiant, dc_id=bjo_dis_identifiant,
-         year=bjo_annee, timestamp=bjo_jour, value=bjo_valeur)
+         year=bjo_annee, timestamp=bjo_jour, value=bjo_valeur)  %>%
+  # -1 means no fish sighted
+  mutate(value = case_when(value < 0 ~ 0,
+                                TRUE ~ value),
+         date = as.Date(timestamp, "%Y-%m-%d", tz="UTC")) %>%
+  select(c(year, date, value))
 
-df$ma <- base_ma(df$value, n = 10, align = "right")
-df <- na.omit(df)
+# fill in missing dates
+all_dates <- data.frame(date = seq(from = min(df$date), 
+                                        to = max(df$date), 
+                                        by = "day"))
+imputed <- merge(all_dates, df, by=c("date"), all.x=TRUE)  
+imputed <- imputed %>%
+  mutate(week = format(date, "%V", tz="UTC"),
+         month = format(date, "%m", tz="UTC"),
+         year=format(date, "%Y", tz="UTC")) 
 
-# Extract single feature we want to predict (and drop any NAs)
-migrations <- df %>% select(c(timestamp, ma))
-migrations <- na.omit(migrations)  # Remove NAs
+value_summary <- imputed %>% 
+  filter(!is.na(value)) %>% group_by(year, month) %>%
+  summarise(non_null = n(), average = mean(value))
+
+# View(value_summary)
+```
+
+```{r}
+# imputing null values
+na_indices <- which(is.na(imputed$value))
+for (i in na_indices) {
+  current_date <- imputed$date[i]
+  n <- 7
+
+  # null value becomes average of previous 7 days (including previously imputed values)
+  window <- imputed %>% 
+    filter(date >= current_date - n & date <= current_date)
+  imputed$value[i] <- mean(window$value, na.rm = TRUE)
+}
+
+# smooth using moving average
+imputed$ma <- base_ma(imputed$value, n=10, align="right")
+
+# Extract single feature we want to predict and drop any NAs
+migrations <- imputed %>% select(c(date, ma))
+migrations <- na.omit(migrations) 
+```
+
+```{r}
+# check stationarity
+tseries::adf.test(ts(migrations$ma, start=min(migrations$date), end=max(migrations$date)))
 ```
 
 ```{r}
 # Visualize the time series
-ggplot(migrations %>% filter(timestamp < "2000-05-21 01:00:00"), aes(x = timestamp, y = ma)) +
+ggplot(migrations %>% filter(date < "2000-05-21"), aes(x = date, y = ma)) +
   geom_line() +
   ggtitle('Fish Sightings History') +
   xlab('Time') +
@@ -291,7 +110,7 @@ for (i in 1:365) {
 migrations <- na.omit(migrations)
 
 # Autocorrelation Function
-acf(migrations$ma, main = "Sightings ACF Plot")
+acf(migrations$ma, main = "Sightings ACF Plot", lag.max = 365)
 ```
 
 ```{r}
@@ -311,15 +130,15 @@ cor(migrations$ma, lag(migrations$ma, n = lag), use = "complete.obs")
 ```
 
 ```{r}
-# AR(30) model
+# AR(p) model
 X_train <- train_data %>% select(paste("Lag", 1:lag, sep = "_"))
 
-# Fit AR(30) Model (OLS)
+# Fit AR(p) Model (OLS)
 X_matrix <- as.matrix(cbind(1, X_train))  # Add intercept column (if desired)
 y_vector <- as.matrix(y_train)
 w <- solve(t(X_matrix) %*% X_matrix) %*% (t(X_matrix) %*% y_vector)
 
-# Predict migration using AR(30)
+# Predict migration using AR(p)
 y_pred <- numeric(length(y_test))
 start <- as.matrix(tail(X_train, 1))
 
@@ -335,55 +154,57 @@ abline(0, 1, col = "red")
 ```
 ```{r}
 # Time series plot of actual vs predicted SO9
-plot(test_data$timestamp, test_data$ma, type = "l", col = "blue", lwd = 2, ylim = range(c(y_pred, test_data$ma)), xlab = "date", ylab = "migration count", main = paste0("AR(",lag,") Model Predictions"))
-lines(test_data$timestamp, y_pred, col = "red", lwd = 2, lty = 2)
-legend("topleft", legend = c("Actual Migration", paste0("AR(",lag,") Predicted Migration")), col = c("blue", "red"), lty = c(1, 2), bty = "n")
+plot(test_data$date, test_data$ma, type = "l", col = "blue", lwd = 2, 
+     ylim = range(c(y_pred, test_data$ma)), xlab = "date", 
+     ylab = "migration count", main = paste0("AR(",lag,") Model Predictions"))
+lines(test_data$date, y_pred, col = "red", lwd = 2, lty = 2)
+legend("topleft", legend = c("Actual Migration", 
+                             paste0("AR(",lag,") Predicted Migration")), 
+       col = c("blue", "red"), lty = c(1, 2), bty = "n")
 
+```
+```{r}
+# Getting measures of model fit
+# Mean Absolute Error (MAE)
+mae <- mean(abs(y_test - y_pred))
+
+# Root Mean Squared Error (RMSE)
+rmse <- sqrt(mean((y_test - y_pred)^2))
+
+cat(sprintf("Mean Absolute Error: %.2f\n", mae))
+cat(sprintf("Root Mean Squared Error: %.2f\n", rmse))
 ```
 
 ```{r}
-# Preprocessing steps
-df <- r_mig_interannual_vichy@data
-df <- df %>% filter(bjo_labelquantite=="Effectif_total") %>%
-  select(c(bjo_identifiant, bjo_dis_identifiant,
-           bjo_annee, bjo_jour, bjo_valeur)) %>%
-    mutate(bjo_valeur = case_when(bjo_valeur < 0 ~ 1,
-                                 TRUE ~ bjo_valeur)) %>%
-  rename(sample_id=bjo_identifiant, dc_id=bjo_dis_identifiant,
-         year=bjo_annee, timestamp=bjo_jour, value=bjo_valeur)
+ar_residuals <- y_test - y_pred
 
-df$week <- strftime(df$timestamp, format = "%V")
-df <- df %>% group_by(week, year) %>%
-  summarize(value = sum(value),
-            timestamp = first(timestamp)) %>% 
-  ungroup() %>%
-  arrange(timestamp)
+plot(ar_residuals, type = "l", main = "Residuals Over Time", ylab = "Residuals", xlab = "Time")
+abline(h = 0, col = "red", lty = 2)
 
-years <- 1997:2012
-year_weeks <- data.frame(year=rep(years, 52)) %>% arrange(year)
-year_weeks$week <- rep(1:52, length(years))
+hist(ar_residuals, breaks = 20, main = "Histogram of Residuals", xlab = "Residuals", col = "gray", probability = T)
+lines(density(ar_residuals, na.rm = T), col = "blue", lwd = 2)
 
-imputed <- merge(year_weeks, df, by=c("year", "week"), all.x = TRUE)
-imputed <- imputed %>% mutate(
-    beginning = lubridate::ymd(str_c(year, "-01-01")),
-    final_date = beginning + lubridate::weeks(sprintf("%02d", week)),
-    month = format(final_date, "%m")
-  ) %>% select(-c(beginning)) %>% group_by(month, year) %>%
-  mutate(value = replace_na(value, mean(na.omit(value)))) %>% 
-  ungroup() %>%
-  mutate(value = replace_na(value, 0))
+qqnorm(ar_residuals, main = "Q-Q Plot of Residuals")
+qqline(ar_residuals, col = "red", lwd = 2)
 
-# Extract single feature we want to predict (and drop any NAs)
-migrations <- imputed %>% select(c(timestamp, value))
-migrations <- na.omit(migrations)  # Remove NAs
+acf(ar_residuals, na.action = na.pass, main = "Autocorrelation of Residuals")
 ```
 
 
+SARIMA
+
 ```{r}
+by_week <- imputed %>% group_by(week, year) %>%
+  summarise(value=sum(value), date=first(date)) %>%
+  arrange(date)
+
+migrations_week <- by_week %>% select(c(date, value))
+migrations_week <- na.omit(migrations_week)
+
 # Split into training and test sets
-train_size <- round(0.8 * nrow(migrations))
-train_data <- migrations[1:train_size,]
-test_data <- migrations[(train_size + 1):nrow(migrations),]
+train_size <- round(0.8 * nrow(migrations_week))
+train_data <- migrations_week[1:train_size,]
+test_data <- migrations_week[(train_size + 1):nrow(migrations_week),]
 
 # Define y_train and y_test
 y_train <- train_data
@@ -396,21 +217,26 @@ y_train_ts <- y_train_ts[,"value"]
 # Square root transformation is often good for count data
 y_train_ts_transformed <- sqrt(y_train_ts)
 ```
+```{r}
+# check stationarity
+tseries::adf.test(ts(migrations_week$value, start=min(migrations_week$date), 
+                     end=max(migrations_week$date)))
+```
 
 ```{r}
-sarima_model <- auto.arima(y_train_ts_transformed, 
+sarima_model <- auto.arima(y_train_ts_transformed,
                           seasonal = TRUE,
                           stepwise = FALSE,
                           approximation = FALSE,
                           D = 1,              # Force seasonal differencing
                           max.P = 2,          # Allow higher order seasonal AR
                           max.Q = 2)          # Allow higher order seasonal MA
-  
+
 forecast_steps <- nrow(y_test)
 y_test <- y_test$value
 
 # Generate forecasts
-sarima_forecast <- forecast(sarima_model, h = forecast_steps)
+sarima_forecast <- forecast(sarima_model, h=forecast_steps)
 
 # Transform the forecasts back to the original scale
 # Square the forecasts and prediction intervals
@@ -432,5 +258,33 @@ lines(ts(y_test, start = end(time(y_train_ts)) + c(0,1), frequency = 52),
 # Add a legend to distinguish between predicted and actual
 legend("topleft", legend = c("Forecasted", "Actual"), col = c("blue", "red"), lty = 1, lwd = 2)
 ```
+```{r}
+# Getting measures of model fit
+# Mean Absolute Error (MAE)
+mae <- mean(abs(y_test - predicted_values))
 
+# Root Mean Squared Error (RMSE)
+rmse <- sqrt(mean((y_test - predicted_values)^2))
+
+cat(sprintf("Mean Absolute Error: %.2f\n", mae))
+cat(sprintf("Root Mean Squared Error: %.2f\n", rmse))
+```
+
+```{r}
+# Checking the diagnostics plots (will need to construct them manually)
+# There are more advanced packages that fit models that allow use of the tsdiag() function for diagnostics (that allow for fitting ARIMA models with the arima() function as well)
+# Compute residuals
+sarima_residuals <- sarima_model$resid
+
+plot(sarima_residuals, type = "l", main = "Residuals Over Time", ylab = "Residuals", xlab = "Time")
+abline(h = 0, col = "red", lty = 2)
+
+hist(sarima_residuals, breaks = 20, main = "Histogram of Residuals", xlab = "Residuals", col = "gray", probability = T)
+lines(density(sarima_residuals, na.rm = T), col = "blue", lwd = 2)
+
+qqnorm(sarima_residuals, main = "Q-Q Plot of Residuals")
+qqline(sarima_residuals, col = "red", lwd = 2)
+
+acf(sarima_residuals, na.action = na.pass, main = "Autocorrelation of Residuals")
+```
 

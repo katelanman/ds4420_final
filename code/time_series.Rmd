@@ -181,6 +181,8 @@ cat(sprintf("Root Mean Squared Error: %.2f\n", rmse))
 ```{r}
 ar_residuals <- y_test - y_pred
 
+ggplot() + geom_point(aes(x=y_pred, y=ar_residuals))
+
 plot(ar_residuals, type = "l", main = "Residuals Over Time", ylab = "Residuals", xlab = "Time")
 abline(h = 0, col = "red", lty = 2)
 
@@ -251,13 +253,6 @@ predicted_values <- sarima_forecast$mean^2
 # Grab max value to ensure that all y values are visible
 max_value <- max(c(predicted_values, y_test), na.rm = TRUE)
 
-# plot(predicted_values, main = "SARIMA Forecast vs Actual", xlab = "Time", ylab = "Value", 
-#      col = "blue", lwd = 2, ylim = c(0, max_value + 10))  # Forecasted values in blue
-# 
-# # Add actual test data values to the plot (in red)
-# lines(ts(y_test, start = end(time(y_train_ts)) + c(0,1), frequency = 52), 
-#       col = "red", lwd = 2, lty = 2)
-
 # Time series plot of actual vs predicted SO9
 plot(test_data$date, y_test, type = "l", col = "blue", lwd = 2, 
      xlim = range(c(seq(min(test_data$date),
@@ -288,6 +283,8 @@ cat(sprintf("Root Mean Squared Error: %.2f\n", rmse))
 ```{r}
 # Compute residuals
 sarima_residuals <- sarima_model$resid
+
+ggplot() + geom_point(aes(x=predicted_values, y=sarima_residuals[1:length(predicted_values)]))
 
 plot(sarima_residuals, type = "l", main = "Residuals Over Time", ylab = "Residuals", xlab = "Time")
 abline(h = 0, col = "red", lty = 2)

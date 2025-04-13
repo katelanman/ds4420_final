@@ -91,7 +91,7 @@ tseries::adf.test(ts(migrations$ma, start=min(migrations$date), end=max(migratio
 
 ```{r}
 # Visualize the time series
-ggplot(migrations %>% filter(date < "2000-05-21"), aes(x = date, y = ma)) +
+ggplot(migrations, aes(x = date, y = ma)) +
   geom_line() +
   ggtitle('Fish Sightings History') +
   xlab('Time') +
@@ -142,26 +142,29 @@ w <- solve(t(X_matrix) %*% X_matrix) %*% (t(X_matrix) %*% y_vector)
 y_pred <- numeric(length(y_test))
 start <- as.matrix(tail(X_train, 1))
 
-for (i in 1:length(y_test)) {
+for (i in 1:(length(y_test)*2)) {
   y_pred[i] <- as.numeric(w[1] + start %*% as.matrix(w[2:(lag+1)]))
   start <- c(y_pred[i], start[1:(lag-1)])
 }
 
 # Observed vs predicted plot
-plot(y_pred, y_test, ylab = "Observed Migration", xlab = "Predicted Migration", 
+plot(y_pred[1:length(y_test)], y_test, ylab = "Observed Migration", xlab = "Predicted Migration", 
      main = "AR(30) Model Predictions")
 abline(0, 1, col = "red")
 ```
 ```{r}
 # Time series plot of actual vs predicted SO9
 plot(test_data$date, test_data$ma, type = "l", col = "blue", lwd = 2, 
+     xlim = range(c(seq(min(test_data$date), max(test_data$date)+(length(y_pred)-length(test_data$date)),
+          "day"))),
      ylim = range(c(y_pred, test_data$ma)), xlab = "date", 
      ylab = "migration count", main = paste0("AR(",lag,") Model Predictions"))
-lines(test_data$date, y_pred, col = "red", lwd = 2, lty = 2)
+lines(seq(min(test_data$date), max(test_data$date)+(length(y_pred)-length(test_data$date)),
+          "day"), 
+      y_pred, col = "red", lwd = 2, lty = 2)
 legend("topleft", legend = c("Actual Migration", 
                              paste0("AR(",lag,") Predicted Migration")), 
        col = c("blue", "red"), lty = c(1, 2), bty = "n")
-
 ```
 ```{r}
 # Getting measures of model fit
@@ -177,6 +180,8 @@ cat(sprintf("Root Mean Squared Error: %.2f\n", rmse))
 
 ```{r}
 ar_residuals <- y_test - y_pred
+
+ggplot() + geom_point(aes(x=y_pred, y=ar_residuals))
 
 plot(ar_residuals, type = "l", main = "Residuals Over Time", ylab = "Residuals", xlab = "Time")
 abline(h = 0, col = "red", lty = 2)
@@ -236,7 +241,7 @@ forecast_steps <- nrow(y_test)
 y_test <- y_test$value
 
 # Generate forecasts
-sarima_forecast <- forecast(sarima_model, h=forecast_steps)
+sarima_forecast <- forecast(sarima_model, h=forecast_steps*2)
 
 # Transform the forecasts back to the original scale
 # Square the forecasts and prediction intervals
@@ -248,12 +253,17 @@ predicted_values <- sarima_forecast$mean^2
 # Grab max value to ensure that all y values are visible
 max_value <- max(c(predicted_values, y_test), na.rm = TRUE)
 
-plot(predicted_values, main = "SARIMA Forecast vs Actual", xlab = "Time", ylab = "Value", 
-     col = "blue", lwd = 2, ylim = c(0, max_value + 10))  # Forecasted values in blue
-
-# Add actual test data values to the plot (in red)
-lines(ts(y_test, start = end(time(y_train_ts)) + c(0,1), frequency = 52), 
-      col = "red", lwd = 2)
+# Time series plot of actual vs predicted SO9
+plot(test_data$date, y_test, type = "l", col = "blue", lwd = 2, 
+     xlim = range(c(seq(min(test_data$date),
+                        max(test_data$date)+((length(predicted_values)-length(test_data$date))*7)+14,
+          "week"))),
+     ylim = c(0, max_value + 10), xlab = "date", 
+     ylab = "migration count", main = "SARIMA Model Predictions")
+lines(seq(min(test_data$date),
+              max(test_data$date)+((length(predicted_values)-length(test_data$date))*7)+14,
+          "week"), 
+      predicted_values, col = "red", lwd = 2, lty = 2)
 
 # Add a legend to distinguish between predicted and actual
 legend("topleft", legend = c("Forecasted", "Actual"), col = c("blue", "red"), lty = 1, lwd = 2)
@@ -271,10 +281,10 @@ cat(sprintf("Root Mean Squared Error: %.2f\n", rmse))
 ```
 
 ```{r}
-# Checking the diagnostics plots (will need to construct them manually)
-# There are more advanced packages that fit models that allow use of the tsdiag() function for diagnostics (that allow for fitting ARIMA models with the arima() function as well)
 # Compute residuals
 sarima_residuals <- sarima_model$resid
+
+ggplot() + geom_point(aes(x=predicted_values, y=sarima_residuals[1:length(predicted_values)]))
 
 plot(sarima_residuals, type = "l", main = "Residuals Over Time", ylab = "Residuals", xlab = "Time")
 abline(h = 0, col = "red", lty = 2)

@@ -5,6 +5,7 @@ from keras.layers import Dense, Input
 from keras.layers import Conv2D, MaxPooling2D, Flatten
 from keras.optimizers import SGD
 from keras.losses import binary_crossentropy
+from tensorflow.keras.metrics import Recall
 import pyarrow.feather as feather
 import numpy as np
 
